@@ -27,15 +27,15 @@ const currentUser = getCurrentUser();
 
 // Category metadata keyed by URL param
 const practiceData = {
-  easy: { title: "Easy Words", description: "Practice common and simple words." },
-  hard: { title: "Hard Words", description: "Challenge yourself with difficult vocabulary." },
-  paragraph: { title: "Paragraphs", description: "Improve your speed with natural paragraphs." },
-  story: { title: "Stories", description: "Type longer passages through short stories." },
-  coding: { title: "Coding", description: "Practice programming syntax and code." },
-  genz: { title: "Gen Z / Slang", description: "Practice modern internet language and slang." },
-  numbers: { title: "Numbers & Symbols", description: "Improve accuracy with numbers and symbols." },
-  quotes: { title: "Quotes", description: "Practice inspiring quotes." },
-  mixed: { title: "Mixed Challenge", description: "A combination of words, punctuation and numbers." },
+  easy: { title: "Easy Words", description: "" },
+  hard: { title: "Hard Words", description: "" },
+  paragraph: { title: "Paragraphs", description: "" },
+  story: { title: "Stories", description: "" },
+  coding: { title: "Coding", description: "" },
+  genz: { title: "Gen Z / Slang", description: "" },
+  numbers: { title: "Numbers & Symbols", description: "" },
+  quotes: { title: "Quotes", description: "" },
+  mixed: { title: "Mixed Challenge", description: "" },
 };
 
 // Selected category from URL (?category=), defaults to easy
