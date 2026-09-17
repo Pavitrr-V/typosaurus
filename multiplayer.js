@@ -2,7 +2,11 @@
    Requires: battle.js (defines syncBattleResultToServer, the battle screen/functions/helpers),
    Socket.IO client, and the multiplayer-server/ (localhost:3000, out of scope). */
 
-const MULTIPLAYER_SERVER_URL = "http://localhost:3000";
+const MULTIPLAYER_SERVER_URL =
+  window.location.hostname === "localhost" ||
+  window.location.hostname === "127.0.0.1"
+    ? "http://localhost:3000"
+    : "https://typosaurus.onrender.com";
 
 let multiplayerSocket = null;
 let multiplayerMode = false;
