@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Leaderboard | Typing Practice</title>
+    <script>try{if(localStorage.getItem("typingTheme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
+    <link rel="stylesheet" href="leaderboard.css">
+    <link rel="stylesheet" href="leagues.css">
+    <link rel="stylesheet" href="theme.css">
+</head>
+<body>
+
+<!-- Topbar: nav + account info -->
+<header class="topbar">
+    <nav class="topbar-nav">
+        <a href="index.html" class="nav-item"><span class="nav-icon">⌨</span><span>Typing</span></a>
+        <a href="analysis.html" class="nav-item"><span class="nav-icon">◔</span><span>Analysis</span></a>
+        <a href="leaderboard.html" class="nav-item active"><span class="nav-icon">♛</span><span>Leaderboard</span></a>
+        <a href="battle.html" class="nav-item">
+    <span class="nav-icon">⚔</span>
+    <span>Battle</span>
+</a>
+    </nav>
+
+    <div class="topbar-account">
+        <div class="account-info">
+            <div class="account-avatar" id="accountAvatar">G</div>
+            <div class="account-details">
+                <strong id="accountName">Guest</strong>
+                <span id="accountType">Guest account</span>
+            </div>
+        </div>
+        <div class="account-actions">
+            <button type="button" class="settings-button" id="settingsButton"><svg class="icon-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg> <span>Settings</span></button>
+            <button type="button" class="logout-button hidden" id="logoutButton">Logout</button>
+        </div>
+    </div>
+</header>
+
+<main class="main-content leaderboard-main">
+    <div class="leaderboard-wrapper">
+
+        <header class="leaderboard-header">
+            <div><h1>Leaderboard</h1><p></p></div>
+            <button type="button" class="refresh-button" id="refreshButton">↻ <span>Refresh</span></button>
+        </header>
+
+        <!-- Loading spinner -->
+        <section class="state-card" id="loadingState">
+            <div class="loading-spinner"></div>
+            <p>Loading leaderboard...</p>
+        </section>
+
+        <!-- Error card -->
+        <section class="state-card error-state hidden" id="errorState">
+            <div class="state-icon">!</div>
+            <h2>Unable to load leaderboard</h2>
+            <p id="errorMessage">Something went wrong.</p>
+            <button type="button" class="primary-button" id="retryButton">Try Again</button>
+        </section>
+
+        <!-- Shown to guests: must log in to see their rank -->
+        <section class="state-card hidden" id="loginState">
+            <div class="state-icon">♟</div>
+            <h2>Login to join the leaderboard</h2>
+            <p>Create an account or log in to see your ranking and compete with other typists.</p>
+            <button type="button" class="primary-button" id="loginButton">Login</button>
+        </section>
+
+        <!-- No rankings exist yet -->
+        <section class="state-card hidden" id="emptyState">
+            <div class="state-icon">♛</div>
+            <h2>No rankings yet</h2>
+            <p>Complete your first typing test to start building your leaderboard score.</p>
+            <button type="button" class="primary-button" id="practiceButton">Start Practicing</button>
+        </section>
+
+        <!-- Main leaderboard content, populated by leaderboard.js -->
+        <div id="leaderboardContent" class="hidden">
+
+            <!-- Current user's own rank card -->
+            <section class="your-ranking" id="yourRanking">
+                <div class="your-ranking-label">YOUR RANK</div>
+                <div class="your-ranking-content">
+                    <div class="your-rank-number">#<span id="yourRank">-</span></div>
+                    <div class="your-user">
+                        <div class="your-avatar" id="yourAvatar">U</div>
+                        <div><strong id="yourName">You</strong><span>Keep typing and climb higher.</span></div>
+                    </div>
+                    <div class="your-stat"><span>Score</span><strong id="yourScore">0</strong></div>
+                    <div class="your-stat"><span>Tests</span><strong id="yourTests">0</strong></div>
+                    <div class="your-stat"><span>Avg. WPM</span><strong id="yourWpm">0</strong></div>
+                    <div class="your-stat"><span>Accuracy</span><strong id="yourAccuracy">0%</strong></div>
+                </div>
+            </section>
+
+            <!-- Top 3 podium -->
+            <section class="podium-section">
+                <div class="section-heading"><div><h2>Top Typists</h2><p></p></div></div>
+
+                <div class="podium">
+                    <div class="podium-card second">
+                        <div class="podium-avatar"><span id="secondAvatar">2</span></div>
+                        <div class="podium-medal">2</div>
+                        <strong id="secondName">—</strong>
+                        <span class="podium-score"><span id="secondScore">0</span> pts</span>
+                        <div class="podium-base">2</div>
+                    </div>
+                    <div class="podium-card first">
+                        <div class="crown">♛</div>
+                        <div class="podium-avatar"><span id="firstAvatar">1</span></div>
+                        <div class="podium-medal">1</div>
+                        <strong id="firstName">—</strong>
+                        <span class="podium-score"><span id="firstScore">0</span> pts</span>
+                        <div class="podium-base">1</div>
+                    </div>
+                    <div class="podium-card third">
+                        <div class="podium-avatar"><span id="thirdAvatar">3</span></div>
+                        <div class="podium-medal">3</div>
+                        <strong id="thirdName">—</strong>
+                        <span class="podium-score"><span id="thirdScore">0</span> pts</span>
+                        <div class="podium-base">3</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Full rankings table -->
+            <section class="rankings-section">
+                <div class="section-heading"><div><h2>All Rankings</h2><p></p></div></div>
+
+                <div class="table-container">
+                    <table class="leaderboard-table">
+                        <thead>
+                            <tr>
+                                <th class="rank-column">Rank</th>
+                                <th>Typist</th>
+                                <th>Score</th>
+                                <th>Tests</th>
+                                <th>Avg. WPM</th>
+                                <th>Accuracy</th>
+                            </tr>
+                        </thead>
+                        <tbody id="leaderboardBody"></tbody>
+                    </table>
+                </div>
+            </section>
+
+        </div>
+    </div>
+</main>
+
+<script src="theme.js"></script>
+<script src="leagues.js"></script>
+<script src="account.js"></script>
+<script src="leaderboard.js"></script>
+
+<!-- Overlay shown while logging out -->
+<div id="logoutLoadingOverlay" class="logout-loading-overlay hidden">
+    <div class="logout-loading-card">
+        <div class="logout-loading-spinner"></div>
+        <h2>Logging out...</h2>
+        <p>Please wait while we securely end your session.</p>
+    </div>
+</div>
+
+</body>
+</html>

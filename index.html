@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Typing Practice</title>
+    <script>try{if(localStorage.getItem("typingTheme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="leagues.css">
+    <link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<div class="app">
+
+    <!-- Topbar: nav + account info -->
+    <header class="topbar">
+        <nav class="topbar-nav">
+            <a href="index.html" class="nav-item active"><span class="nav-icon">⌨</span><span>Typing</span></a>
+            <a href="analysis.html" class="nav-item"><span class="nav-icon">◔</span><span>Analysis</span></a>
+            <a href="leaderboard.html" class="nav-item"><span class="nav-icon">♛</span><span>Leaderboard</span></a>
+            <a href="battle.html" class="nav-item">
+    <span class="nav-icon">⚔</span>
+    <span>Battle</span>
+</a>
+        </nav>
+
+        <div class="topbar-account">
+            <div class="account-info">
+                <div class="account-avatar" id="accountAvatar">G</div>
+                <div class="account-details">
+                    <strong id="accountName">Guest</strong>
+                    <span id="accountType">Guest account</span>
+                </div>
+            </div>
+            <div class="account-actions">
+                <button type="button" class="settings-button" id="settingsButton"><svg class="icon-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg> <span>Settings</span></button>
+                <button type="button" class="logout-button hidden" id="logoutButton">Logout</button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main: list of typing categories, clicking a row starts practice.html -->
+    <main class="main-content">
+        <div class="content-container">
+
+            <header class="page-header">
+                <div>
+                    <div class="eyebrow"></div>
+                    <h1>Typing Categories</h1>
+                </div>
+            </header>
+
+            <section class="category-list">
+
+                <article class="category-row" data-category="easy">
+                    <div class="category-number">1</div>
+                    <div class="category-details"><h2>Easy Words</h2><p></p></div>
+                    <button class="start-button"><span>▶</span> Start</button>
+                </article>
+
+                <article class="category-row" data-category="hard">
+                    <div class="category-number">2</div>
+                    <div class="category-details"><h2>Hard Words</h2><p></p></div>
+                    <button class="start-button"><span>▶</span> Start</button>
+                </article>
+
+                <article class="category-row" data-category="paragraph">
+                    <div class="category-number">3</div>
+                    <div class="category-details"><h2>Paragraphs</h2><p></p></div>
+                    <button class="start-button"><span>▶</span> Start</button>
+                </article>
+
+                <article class="category-row" data-category="coding">
+                    <div class="category-number">4</div>
+                    <div class="category-details"><h2>Coding</h2><p></p></div>
+                    <button class="start-button"><span>▶</span> Start</button>
+                </article>
+
+                <article class="category-row" data-category="numbers">
+                    <div class="category-number">5</div>
+                    <div class="category-details"><h2>Numbers & Symbols</h2><p></p></div>
+                    <button class="start-button"><span>▶</span> Start</button>
+                </article>
+
+                <article class="category-row" data-category="mixed">
+                    <div class="category-number">6</div>
+                    <div class="category-details"><h2>Mixed</h2><p></p></div>
+                    <button class="start-button"><span>▶</span> Start</button>
+                </article>
+
+            </section>
+        </div>
+    </main>
+</div>
+
+<script src="theme.js"></script>
+<script src="leagues.js"></script>
+<script src="account.js"></script>
+<script src="app.js"></script>
+
+<!-- Overlay shown while logging out -->
+<div id="logoutLoadingOverlay" class="logout-loading-overlay hidden">
+    <div class="logout-loading-card">
+        <div class="logout-loading-spinner"></div>
+        <h2>Logging out...</h2>
+        <p>Please wait while we securely end your session.</p>
+    </div>
+</div>
+
+</body>
+</html>

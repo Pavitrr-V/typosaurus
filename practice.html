@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Typing Practice</title>
+    <script>try{if(localStorage.getItem("typingTheme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
+    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="leagues.css">
+    <link rel="stylesheet" href="theme.css" />
+  </head>
+  <body>
+    <div class="app">
+      <!-- Topbar: brand + nav + account info -->
+      <header class="topbar">
+        <nav class="topbar-nav">
+          <a href="index.html" class="nav-item active"><span class="nav-icon">⌨</span><span>Typing</span></a>
+          <a href="analysis.html" class="nav-item"><span class="nav-icon">◔</span><span>Analysis</span></a>
+          <a href="leaderboard.html" class="nav-item"><span class="nav-icon">♛</span><span>Leaderboard</span></a>
+          <a href="battle.html" class="nav-item"><span class="nav-icon">⚔</span><span>Battle</span></a>
+        </nav>
+        <div class="topbar-account">
+          <div class="account-info">
+            <div class="account-avatar" id="accountAvatar">G</div>
+            <div class="account-details">
+              <strong id="accountName">Guest</strong>
+              <span id="accountType">Guest account</span>
+            </div>
+          </div>
+          <div class="account-actions">
+            <button type="button" class="settings-button" id="settingsButton"><svg class="icon-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg> <span>Settings</span></button>
+            <button type="button" class="logout-button hidden" id="logoutButton">Logout</button>
+          </div>
+        </div>
+      </header>
+
+      <main class="main-content typing-main">
+        <div class="typing-wrapper">
+          <!-- Active typing test screen -->
+          <section id="typingScreen">
+            <button type="button" class="back-button" id="backButton">← Back to Practice</button>
+
+            <div class="typing-page-header">
+              <h1 id="categoryTitle">Typing Practice</h1>
+              <p id="categoryDescription">Improve your typing speed and accuracy.</p>
+            </div>
+
+            <!-- Live time / WPM / accuracy -->
+            <div class="live-stats">
+              <div class="live-stat"><span>Time</span><strong id="liveTime">0:00</strong></div>
+              <div class="live-stat"><span>WPM</span><strong id="liveWpm">0</strong></div>
+              <div class="live-stat"><span>Accuracy</span><strong id="liveAccuracy">100%</strong></div>
+            </div>
+
+            <!-- Progress bar: fills as text is typed -->
+            <div class="progress-track" id="progressTrack">
+              <div class="progress-fill" id="progressFill"></div>
+            </div>
+
+            <!-- Text to type, rendered by practice.js -->
+            <div class="typing-preview" id="typingPreview" tabindex="0">
+              <div class="typing-text" id="typingText"></div>
+            </div>
+
+            <!-- Off-screen input that captures keystrokes -->
+            <input type="text" id="hiddenTypingInput" class="hidden-typing-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
+
+            <div class="typing-controls">
+              <div class="typing-controls-left">
+                <button type="button" class="control-button" id="restartButton">↻ Restart</button>
+                <button type="button" class="control-button sound-toggle-button" id="soundToggleButton" aria-pressed="true" title="Sound on (click to mute)"><svg class="icon-sound" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg></button>
+              </div>
+              <div class="typing-live-info">
+                <span class="typing-status" id="typingStatus">Start typing...</span>
+                <span class="typing-timer" id="typingTimer">0:00</span>
+              </div>
+            </div>
+          </section>
+
+          <!-- Results screen, shown after test completes -->
+          <section class="results-screen hidden" id="resultsScreen">
+            <div class="results-header">
+              <h1>Test Complete</h1>
+              <p>Here's how you performed.</p>
+            </div>
+
+            <div class="results-grid">
+              <div class="result-card"><span class="result-label">WPM</span><strong id="resultWpm">0</strong><span class="result-description">Words per minute</span></div>
+              <div class="result-card"><span class="result-label">Accuracy</span><strong id="resultAccuracy">0%</strong><span class="result-description">Typing accuracy</span></div>
+              <div class="result-card"><span class="result-label">Time</span><strong id="resultTime">0:00</strong><span class="result-description">Test duration</span></div>
+            </div>
+
+            <div class="character-stats">
+              <div class="character-stat"><span>Characters</span><strong id="resultCharacters">0</strong></div>
+              <div class="character-stat"><span>Correct</span><strong id="resultCorrect">0</strong></div>
+              <div class="character-stat"><span>Incorrect</span><strong id="resultIncorrect">0</strong></div>
+            </div>
+
+            <div class="results-actions">
+              <button type="button" class="control-button primary-control-button" id="tryAgainButton">↻ Try Again</button>
+              <button type="button" class="control-button" id="resultsBackButton">← Back to Practice</button>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <script src="theme.js"></script>
+    <script src="leagues.js"></script>
+    <script src="account.js"></script>
+    <script src="content-engine.js"></script>
+    <script src="practice.js"></script>
+  </body>
+</html>

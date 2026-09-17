@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Battle - Typing Tracker</title>
+  <script>try{if(localStorage.getItem("typingTheme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="leagues.css">
+  <link rel="stylesheet" href="battle.css">
+  <link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<div class="app">
+  <!-- Topbar: nav + account info -->
+  <header class="topbar">
+    <nav class="topbar-nav">
+      <a href="index.html" class="nav-item"><span class="nav-icon">⌨</span><span>Typing</span></a>
+      <a href="analysis.html" class="nav-item"><span class="nav-icon">◔</span><span>Analysis</span></a>
+      <a href="leaderboard.html" class="nav-item"><span class="nav-icon">♛</span><span>Leaderboard</span></a>
+      <a href="battle.html" class="nav-item active"><span class="nav-icon">⚔</span><span>Battle</span></a>
+    </nav>
+    <div class="topbar-account">
+      <div class="account-info">
+        <div class="account-avatar" id="accountAvatar">G</div>
+        <div class="account-details">
+          <strong id="accountName">Guest</strong>
+          <span id="accountType">Guest account</span>
+        </div>
+      </div>
+      <div class="account-actions">
+        <button type="button" class="settings-button" id="settingsButton"><svg class="icon-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06-1.42 1.42-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V20h-2v-.08a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06-1.42-1.42.06-.06A1.65 1.65 0 0 0 8.6 15a1.65 1.65 0 0 0-1.51-1H7v-2h.08a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82L8.2 9.12 9.62 7.7l.06.06a1.65 1.65 0 0 0 1.82.33h.01A1.65 1.65 0 0 0 12.5 6.6V6h2v.6a1.65 1.65 0 0 0 1 1.49h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06 1.42 1.42-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H20v2h-.08a1.65 1.65 0 0 0-1.52 1Z"></path></svg><span>Settings</span></button>
+        <button type="button" class="logout-button hidden" id="logoutButton">Logout</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main battle area -->
+  <main class="battle-main">
+    <div class="battle-wrapper">
+
+      <!-- Setup screen -->
+      <section id="battleSetup" class="battle-screen">
+        <button type="button" class="battle-back-button" id="setupBackButton">← Back to Typing</button>
+        <div class="battle-header">
+          <div class="battle-eyebrow">BATTLE MODE</div>
+          <h1>Choose Your Battle</h1>
+        </div>
+        <div class="battle-setup-card">
+          <div class="battle-mode-grid">
+
+            <!-- Bot battle -->
+            <div class="battle-mode-card bot-mode-card">
+              <div class="mode-card-header">
+                <div class="mode-icon bot-mode-icon">◆</div>
+                <div><h2>Bot Battle</h2><p></p></div>
+              </div>
+              <div class="setup-section">
+                <label>Difficulty</label>
+                <div class="difficulty-options">
+                  <button type="button" class="difficulty-option active" data-difficulty="easy"><strong>Easy</strong><span>25–40 WPM</span></button>
+                  <button type="button" class="difficulty-option" data-difficulty="medium"><strong>Medium</strong><span>45–65 WPM</span></button>
+                  <button type="button" class="difficulty-option" data-difficulty="hard"><strong>Hard</strong><span>70–95 WPM</span></button>
+                </div>
+              </div>
+              <div class="setup-section">
+                <label for="battleCategory">Typing Category</label>
+                <select id="battleCategory">
+                  <option value="easy">Easy Words</option>
+                  <option value="hard">Hard Words</option>
+                  <option value="paragraph">Paragraphs</option>
+                  <option value="coding">Coding</option>
+                  <option value="numbers">Numbers &amp; Symbols</option>
+                  <option value="mixed">Mixed Challenge</option>
+                </select>
+              </div>
+              <button type="button" class="start-battle-button" id="startBattleButton"><span>⚔</span><span>Start Bot Battle</span></button>
+            </div>
+
+            <!-- Multiplayer -->
+            <div class="battle-mode-card multiplayer-mode-card">
+              <div class="mode-card-header">
+                <div class="mode-icon multiplayer-mode-icon">◉</div>
+                <div><h2>Real Player</h2><p></p></div>
+              </div>
+              <div class="multiplayer-info">
+                <p class="multiplayer-note">Race a real person — quick matchmaking or a private battle with your own code.</p>
+                <div class="multiplayer-action-area">
+                  <button type="button" class="start-battle-button" id="findOpponentButton"><span>◉</span><span>Find Opponent</span></button>
+                </div>
+              </div>
+              <!-- Private battle: create (code + invite link) or join via 6-digit code -->
+              <div class="private-battle-section">
+                <button type="button" class="battle-secondary-button" id="createPrivateBattleButton"><span>🔒</span><span>Create Private Battle</span></button>
+                <div class="private-waiting-panel hidden" id="privateWaitingPanel">
+                  <span class="private-wait-label">Share this code</span>
+                  <strong class="private-code-display" id="privateCodeDisplay">000000</strong>
+                  <div class="private-invite-box">
+                    <span class="private-invite-link" id="privateInviteLink"></span>
+                    <button type="button" class="private-copy-button" id="copyInviteButton">Copy</button>
+                  </div>
+                  <span class="private-wait-hint">Waiting for opponent to join...</span>
+                  <button type="button" class="battle-secondary-button" id="privateCancelButton">Cancel</button>
+                </div>
+                <div class="private-join-panel" id="privateJoinPanel">
+                  <label class="private-join-label" for="privateCodeInput">Join with code</label>
+                  <div class="private-join-row">
+                    <input type="text" id="privateCodeInput" maxlength="6" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="6-digit code">
+                    <button type="button" class="start-battle-button private-join-button" id="joinPrivateBattleButton">Join</button>
+                  </div>
+                </div>
+                <p class="private-battle-status" id="privateBattleStatus"></p>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </section>
+
+      <!-- Countdown -->
+      <section id="battleCountdown" class="battle-countdown hidden">
+        <div class="countdown-label">GET READY</div>
+        <div class="countdown-number" id="countdownNumber">3</div>
+        <div class="countdown-subtext">The battle is about to begin</div>
+      </section>
+
+      <!-- Battle game -->
+      <section id="battleGame" class="battle-screen hidden">
+        <div class="battle-game-header">
+          <button type="button" class="battle-back-button" id="quitBattleButton">← Quit Battle</button>
+          <div class="battle-category-label">
+            <span id="battleCategoryLabel">Easy Words</span>
+            <span class="battle-dot">•</span>
+            <span id="battleDifficultyLabel">Easy</span>
+          </div>
+        </div>
+        <div class="battle-racers">
+
+          <!-- User -->
+          <div class="racer-card user-racer-card">
+            <div class="racer-top">
+              <div class="racer-avatar user-racer-avatar"><span id="battleUserAvatar">G</span></div>
+              <div class="racer-info"><strong id="battleUserName">You</strong><span>You</span></div>
+              <div class="racer-wpm"><strong id="userWpm">0</strong><span>WPM</span></div>
+            </div>
+            <div class="race-track"><div class="race-progress user-progress" id="userProgress"></div></div>
+            <div class="race-stats">
+              <span><strong id="userProgressText">0%</strong> complete</span>
+              <span><strong id="userAccuracy">100%</strong> accuracy</span>
+            </div>
+          </div>
+
+          <div class="race-vs">VS</div>
+
+          <!-- Opponent -->
+          <div class="racer-card bot-racer-card">
+            <div class="racer-top">
+              <div class="racer-avatar bot-racer-avatar">◆</div>
+              <div class="racer-info"><strong id="botName">SpeedBot</strong><span>Bot</span></div>
+              <div class="racer-wpm"><strong id="botWpm">0</strong><span>WPM</span></div>
+            </div>
+            <div class="race-track"><div class="race-progress bot-progress" id="botProgress"></div></div>
+            <div class="race-stats">
+              <span><strong id="botProgressText">0%</strong> complete</span>
+              <span><strong id="botAccuracy">100%</strong> accuracy</span>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Typing area -->
+        <div class="battle-typing-card">
+          <div class="battle-typing-text" id="battleTypingText" tabindex="0"></div>
+          <input type="text" id="battleTypingInput" class="battle-hidden-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+        </div>
+        <div class="battle-live-status">
+          <span id="battleStatus">Start typing...</span>
+          <span id="battleTime">00:00</span>
+        </div>
+      </section>
+
+      <!-- Result screen -->
+      <section id="battleResult" class="battle-screen hidden">
+        <div class="battle-result-card">
+          <div class="result-battle-icon" id="resultBattleIcon">🏆</div>
+          <h1 id="battleResultTitle">You Win!</h1>
+          <p id="battleResultSubtitle">Great typing.</p>
+          <p class="battle-score-note">Winner is decided by Battle Score (speed weighted by accuracy) — not just who finished typing first.</p>
+          <div class="battle-result-grid">
+            <div class="battle-result-stat score-stat"><span>Your Score</span><strong id="resultUserScore">0</strong></div>
+            <div class="battle-result-stat score-stat"><span>Bot Score</span><strong id="resultBotScore">0</strong></div>
+            <div class="battle-result-stat"><span>Your WPM</span><strong id="resultUserWpm">0</strong></div>
+            <div class="battle-result-stat"><span>Bot WPM</span><strong id="resultBotWpm">0</strong></div>
+            <div class="battle-result-stat"><span>Your Accuracy</span><strong id="resultUserAccuracy">0%</strong></div>
+            <div class="battle-result-stat"><span>Bot Accuracy</span><strong id="resultBotAccuracy">0%</strong></div>
+          </div>
+          <div class="battle-result-actions">
+            <button type="button" class="start-battle-button" id="rematchButton"><span>↻</span><span>Rematch</span></button>
+            <button type="button" class="battle-secondary-button" id="resultBackButton"><span>←</span><span>Back</span></button>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<!-- Scripts -->
+<script src="theme.js"></script>
+<script src="leagues.js"></script>
+<script src="account.js"></script>
+<script src="content-engine.js"></script>
+<script src="battle.js"></script>
+<script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+<script src="multiplayer.js"></script>
+</body>
+</html>

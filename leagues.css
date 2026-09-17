@@ -1,0 +1,74 @@
+/* League system styles (shared across all pages) */
+
+/* Badge */
+.league-badge { display: inline-flex !important; align-items: center !important; gap: 4px !important; padding: 2px 8px 2px 6px !important; border-radius: 999px !important; background: color-mix(in srgb, var(--league-color) 12%, #ffffff); border: 1px solid color-mix(in srgb, var(--league-color) 35%, #ffffff); color: var(--league-color) !important; font-weight: 700 !important; font-style: normal !important; text-decoration: none !important; line-height: 1.4 !important; white-space: nowrap !important; width: max-content !important; max-width: max-content !important; flex: 0 0 auto !important; }
+/* The widget drops into name/subtitle columns whose page CSS often targets bare span/strong descendants; sizing properties are !important throughout because this self-contained component must look identical on every host page. */
+.league-badge-icon { display: flex !important; align-items: center !important; justify-content: center !important; flex: 0 0 auto !important; }
+.league-badge-icon svg { width: 1em; height: 1em; display: block !important; }
+.league-badge-name { font-size: inherit !important; font-weight: inherit !important; line-height: inherit !important; color: inherit !important; }
+
+/* Topbar size */
+.league-badge-md { font-size: 11px !important; gap: 5px !important; padding: 3px 9px 3px 7px !important; }
+.league-badge-md .league-badge-icon svg { width: 12px !important; height: 12px !important; }
+
+/* Leaderboard row size */
+.league-badge-sm { font-size: 10px !important; padding: 2px 7px 2px 5px !important; line-height: 1.3 !important; }
+.league-badge-sm .league-badge-icon svg { width: 9px !important; height: 9px !important; }
+/* On narrow rows keep just the icon so the row never wraps; full name stays available via the badge title tooltip. */
+@media (max-width: 640px) {
+  .league-badge-sm .league-badge-name { display: none !important; }
+  .league-badge-sm { padding: 4px !important; border-radius: 50% !important; }
+}
+
+/* Topbar placement + hover progress */
+.account-league-wrap { position: relative; display: inline-flex; }
+.league-progress-popover { position: absolute !important; top: calc(100% + 8px); left: 50%; transform: translateX(-50%) translateY(-4px); z-index: 20 !important; min-width: 190px; padding: 10px 12px !important; border-radius: 10px !important; background: #23272e !important; color: #ffffff !important; font-size: 11px !important; line-height: 1.5 !important; box-shadow: 0 10px 24px rgba(20, 24, 30, 0.22); opacity: 0; pointer-events: none; transition: opacity 0.15s ease, transform 0.15s ease; }
+.account-league-wrap:hover .league-progress-popover { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+.league-progress-row { color: rgba(255, 255, 255, 0.85) !important; font-size: inherit !important; }
+.league-progress-track { margin-top: 6px; height: 5px; border-radius: 999px; background: rgba(255, 255, 255, 0.16); overflow: hidden; }
+.league-progress-fill { height: 100%; border-radius: 999px; transition: width 0.25s ease; }
+
+/* Leaderboard placement */
+.typist-league { margin-top: 3px; }
+
+/* Promotion overlay */
+.league-promo-overlay { position: fixed; inset: 0; z-index: 999; display: flex; align-items: center; justify-content: center; background: rgba(12, 14, 18, 0); backdrop-filter: blur(0px); opacity: 0; transition: opacity 0.25s ease, background 0.25s ease, backdrop-filter 0.25s ease; }
+.league-promo-overlay.is-visible { opacity: 1; background: rgba(12, 14, 18, 0.55); backdrop-filter: blur(3px); }
+.league-promo-overlay.is-closing { opacity: 0; }
+.league-promo-card { position: relative; width: min(360px, 88vw); padding: 44px 28px 28px; border-radius: 20px; background: #ffffff; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35); text-align: center; transform: scale(0.75); opacity: 0; transition: transform 0.4s cubic-bezier(0.2, 1.4, 0.4, 1), opacity 0.3s ease; }
+.league-promo-overlay.is-visible .league-promo-card { transform: scale(1); opacity: 1; }
+
+/* Rotating glow behind the badge */
+.league-promo-rays { position: absolute; top: -70px; left: 50%; width: 220px; height: 220px; margin-left: -110px; border-radius: 50%; background: conic-gradient(from 0deg, var(--league-glow), transparent 20%, transparent 80%, var(--league-glow)); opacity: 0.55; filter: blur(2px); animation: league-rays-spin 6s linear infinite; pointer-events: none; }
+@keyframes league-rays-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+/* Particle burst */
+.league-promo-burst { position: absolute; top: 20px; left: 50%; width: 0; height: 0; pointer-events: none; }
+.league-promo-particle { position: absolute; top: 0; left: 0; width: 6px; height: 6px; border-radius: 50%; background: var(--league-color); opacity: 0; transform: rotate(var(--angle)) translateX(0) scale(1); }
+.league-promo-overlay.is-visible .league-promo-particle { animation: league-particle-burst 0.7s ease-out both; animation-delay: var(--delay); }
+@keyframes league-particle-burst {
+  0% { opacity: 1; transform: rotate(var(--angle)) translateX(0) scale(1); }
+  100% { opacity: 0; transform: rotate(var(--angle)) translateX(90px) scale(0.3); }
+}
+
+/* Badge itself */
+.league-promo-badge { position: relative; z-index: 1; width: 84px; height: 84px; margin: 0 auto 18px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: color-mix(in srgb, var(--league-color) 14%, #ffffff); border: 2px solid var(--league-color); color: var(--league-color); box-shadow: 0 0 0 8px color-mix(in srgb, var(--league-color) 10%, transparent); transform: scale(0.4); opacity: 0; transition: transform 0.5s cubic-bezier(0.2, 1.6, 0.4, 1) 0.1s, opacity 0.4s ease 0.1s; }
+.league-promo-overlay.is-visible .league-promo-badge { transform: scale(1); opacity: 1; }
+.league-promo-badge svg { width: 40px; height: 40px; }
+
+/* Text */
+.league-promo-text { position: relative; z-index: 1; opacity: 0; transform: translateY(10px); transition: opacity 0.35s ease 0.25s, transform 0.35s ease 0.25s; }
+.league-promo-overlay.is-visible .league-promo-text { opacity: 1; transform: translateY(0); }
+.league-promo-label { display: inline-block; margin-bottom: 4px; color: var(--league-color); font-size: 11px; font-weight: 800; letter-spacing: 2px; }
+.league-promo-tier { margin: 0 0 6px; color: #23272e; font-size: 24px; font-weight: 800; }
+.league-promo-sub { margin: 0; color: #767c85; font-size: 13px; }
+
+.league-promo-continue { position: relative; z-index: 1; margin-top: 22px; padding: 10px 22px; border: none; border-radius: 10px; background: var(--league-color); color: #ffffff; font-size: 13px; font-weight: 700; cursor: pointer; opacity: 0; transform: translateY(10px); transition: opacity 0.35s ease 0.35s, transform 0.35s ease 0.35s, filter 0.15s ease; }
+.league-promo-overlay.is-visible .league-promo-continue { opacity: 1; transform: translateY(0); }
+.league-promo-continue:hover { filter: brightness(1.08); }
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .league-promo-rays, .league-promo-particle { display: none; }
+  .league-promo-card, .league-promo-badge, .league-promo-text, .league-promo-continue { transition-duration: 0.15s; transform: none !important; }
+}

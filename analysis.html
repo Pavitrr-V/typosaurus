@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Analysis | Typing Practice</title>
+  <script>try{if(localStorage.getItem("typingTheme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
+  <link rel="stylesheet" href="analysis.css">
+  <link rel="stylesheet" href="leagues.css">
+  <link rel="stylesheet" href="theme.css">
+</head>
+<body>
+  <!-- Topbar: nav + account info -->
+  <header class="topbar">
+    <nav class="topbar-nav">
+      <a href="index.html" class="nav-item"><span class="nav-icon">⌨</span><span>Typing</span></a>
+      <a href="analysis.html" class="nav-item active"><span class="nav-icon">◔</span><span>Analysis</span></a>
+      <a href="leaderboard.html" class="nav-item"><span class="nav-icon">♛</span><span>Leaderboard</span></a>
+      <a href="battle.html" class="nav-item"><span class="nav-icon">⚔</span><span>Battle</span></a>
+    </nav>
+    <div class="topbar-account">
+      <div class="account-info">
+        <div class="account-avatar" id="accountAvatar">G</div>
+        <div class="account-details">
+          <strong id="accountName">Guest</strong>
+          <span id="accountType">Guest account</span>
+        </div>
+      </div>
+      <div class="account-actions">
+        <button type="button" class="settings-button" id="settingsButton"><svg class="icon-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg> <span>Settings</span></button>
+        <button type="button" class="logout-button hidden" id="logoutButton">Logout</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="main-content analysis-main">
+    <div class="content-wrapper">
+      <header class="page-header">
+        <div>
+          <div class="eyebrow"></div>
+          <h1>Typing analysis</h1>
+          <p></p>
+        </div>
+        <button type="button" class="refresh-button" id="refreshButton">↻ <span>Refresh</span></button>
+      </header>
+
+      <!-- Loading spinner shown while stats fetch -->
+      <div id="loadingState" class="state-card">
+        <div class="loader"></div>
+        <span>The data is ready, we're just making the spinning wheel look dramatic.</span>
+      </div>
+
+      <!-- Error card shown if the fetch fails -->
+      <div id="errorState" class="state-card error-state hidden">
+        <div>
+          <strong>Couldn't load your analysis</strong>
+          <p id="errorMessage">Please try again.</p>
+        </div>
+        <button id="retryButton" class="small-button" type="button">Retry</button>
+      </div>
+
+      <!-- Empty state: no typing tests yet -->
+      <section id="emptyState" class="empty-state hidden">
+        <div class="empty-icon">⌨</div>
+        <h2>Start typing to build your profile</h2>
+        <p>Complete a typing test and your progress will appear here.</p>
+        <a href="index.html" class="primary-button">Start practicing</a>
+      </section>
+
+      <!-- Main analysis content, populated by analysis.js -->
+      <div id="analysisContent" class="hidden">
+        <!-- Overview stat cards -->
+        <section class="overview-grid">
+          <article class="overview-card"><span>Tests</span><strong id="totalTests">0</strong></article>
+          <article class="overview-card"><span>Average speed</span><strong><span id="averageWpm">0</span> <small>WPM</small></strong></article>
+          <article class="overview-card"><span>Accuracy</span><strong><span id="averageAccuracy">0</span> <small>%</small></strong></article>
+          <article class="overview-card"><span>Total typing time</span><strong id="totalTime" class="time-value">00:00</strong></article>
+        </section>
+
+        <!-- WPM / accuracy charts -->
+        <section class="charts-grid">
+          <article class="chart-card">
+            <div class="chart-header">
+              <div><span class="chart-label">SPEED</span><h2>WPM over time</h2></div>
+              <div class="chart-current"><strong id="bestWpm">0</strong><span>best</span></div>
+            </div>
+            <div id="wpmChart" class="chart"></div>
+          </article>
+          <article class="chart-card">
+            <div class="chart-header">
+              <div><span class="chart-label">PRECISION</span><h2>Accuracy over time</h2></div>
+              <div class="chart-current"><strong id="bestAccuracy">0</strong><span>best</span></div>
+            </div>
+            <div id="accuracyChart" class="chart"></div>
+          </article>
+        </section>
+
+        <!-- Quick text summary of progress -->
+        <section class="summary-card">
+          <div class="summary-icon">✦</div>
+          <div>
+            <span class="summary-label">ANALYTIC REVIEW</span>
+            <h2 id="progressTitle">Keep practicing</h2>
+            <p id="progressText">Complete more tests to see your progress.</p>
+          </div>
+        </section>
+
+        <!-- Category breakdown + personal records -->
+        <section class="lower-grid">
+          <article class="panel">
+            <div class="panel-header"><div><span class="panel-label">CATEGORIES</span><h2>Where you perform best</h2></div></div>
+            <div id="categoryList" class="category-list"></div>
+          </article>
+          <article class="panel">
+            <div class="panel-header"><div><span class="panel-label">PERSONAL BEST</span><h2>Your records</h2></div></div>
+            <div class="record-list">
+              <div class="record-row"><div><span>Fastest speed</span><small>Best WPM</small></div><strong><span id="recordWpm">0</span> <small>WPM</small></strong></div>
+              <div class="record-row"><div><span>Best accuracy</span><small>Most precise test</small></div><strong><span id="recordAccuracy">0</span> <small>%</small></strong></div>
+            </div>
+          </article>
+        </section>
+
+        <!-- Recent test history -->
+        <section class="panel recent-panel">
+          <div class="panel-header"><div><span class="panel-label">HISTORY</span><h2>Recent tests</h2></div></div>
+          <div id="historyList" class="history-list"></div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <script src="theme.js"></script>
+  <script src="leagues.js"></script>
+  <script src="account.js"></script>
+  <script src="analysis.js"></script>
+
+  <!-- Overlay shown while logging out -->
+  <div id="logoutLoadingOverlay" class="logout-loading-overlay hidden">
+    <div class="logout-loading-card">
+      <div class="logout-loading-spinner"></div>
+      <h2>Logging out...</h2>
+      <p>Please wait while we securely end your session.</p>
+    </div>
+  </div>
+</body>
+</html>
