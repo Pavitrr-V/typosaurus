@@ -1,361 +1,810 @@
-// REAL-USER MULTIPLAYER SERVER — Socket.IO server: matchmaking, lockstep races, server-authoritative scoring.
-const express = require("express");
-const http = require("http");
-const { Server } = require("socket.io");
-const cors = require("cors");
+/* REAL USER MULTIPLAYER BATTLE — SERVER-AUTHORITATIVE VERSION.
+   Requires: battle.js (defines syncBattleResultToServer, the battle screen/functions/helpers),
+   Socket.IO client, and the multiplayer-server/ (localhost:3000, out of scope). */
 
-const app = express();
-const server = http.createServer(app);
-app.use(cors());
-const io = new Server(server, { cors: { origin: "*", methods: ["GET", "POST"] } });
-const PORT = process.env.PORT || 3000;
+const MULTIPLAYER_SERVER_URL =
+  window.location.hostname === "localhost" ||
+  window.location.hostname === "127.0.0.1"
+    ? "http://localhost:3000"
+    : "https://typosaurus.onrender.com";
 
-/* MATCHMAKING — FIFO queue of waiting players + active battle rooms + pending private rooms. */
-const matchmakingQueue = [];
-const battles = new Map();
-// Pending private rooms keyed by 6-digit code: code → { code, hostPlayer } (no room exists until someone joins).
-const privateBattles = new Map();
+let multiplayerSocket = null;
+let multiplayerMode = false;
+let multiplayerSearching = false;
+let multiplayerRoomId = null;
+let multiplayerOpponent = null;
+let multiplayerTargetText = "";
+let multiplayerTypedCharacters = [];
+let multiplayerBattleStarted = false;
+let multiplayerBattleFinished = false;
+let multiplayerStartTime = null;
+let multiplayerStartAt = null;
+let multiplayerTimer = null;
+let multiplayerCountdownTimer = null;
+let multiplayerLeavingBattle = false;
+let multiplayerPrivateCode = null;    // 6-digit code of the room we are hosting
+let multiplayerWaitingPrivate = false; // true while hosting a waiting private room
+let multiplayerAutoJoinCode = null;   // code from an invite link (?private=XXXXXX)
 
-// Shared pool of passages the server hands to both racers.
-const BATTLE_TEXTS = [
-  "The best way to improve is to practice consistently and focus on accuracy.",
-  "Small improvements every day can turn into impressive results over time.",
-  "Stay focused on the text and let your fingers follow your thoughts naturally.",
-  "Fast typing is useful, but accurate typing is what makes your performance reliable.",
-  "Technology gives people powerful tools to learn create communicate and solve problems.",
-  "Good habits are built through repetition patience and consistent effort.",
-  "A calm mind helps you react faster and make fewer mistakes while typing.",
-  "Learning to type quickly takes practice but learning to type accurately takes discipline.",
-  "Great results usually come from small improvements repeated over a long period.",
-  "The goal is not simply to type faster but to become faster without losing control.",
-  "Every mistake is useful when you notice it understand it and work to avoid repeating it.",
-  "Programming requires patience because solving difficult problems often takes several attempts.",
-  "Creative ideas become more valuable when you turn them into something people can actually use.",
-  "A strong foundation makes it easier to learn more advanced concepts later.",
-  "When you concentrate completely on the task your speed and accuracy can improve naturally."
-];
+/* DOM
+   IMPORTANT: battle.js already owns quitBattleButton and rematchButton variables,
+   so multiplayer.js deliberately uses unique names (mp*) for the same elements. */
+const findOpponentButton = document.getElementById("findOpponentButton");
+const mpQuitBattleButton = document.getElementById("quitBattleButton");
+const mpRematchButton = document.getElementById("rematchButton");
+const mpResultBackButton = document.getElementById("resultBackButton");
+// Private battle DOM.
+const createPrivateBattleButton = document.getElementById("createPrivateBattleButton");
+const privateWaitingPanel = document.getElementById("privateWaitingPanel");
+const privateCodeDisplay = document.getElementById("privateCodeDisplay");
+const privateInviteLink = document.getElementById("privateInviteLink");
+const copyInviteButton = document.getElementById("copyInviteButton");
+const privateCancelButton = document.getElementById("privateCancelButton");
+const privateJoinPanel = document.getElementById("privateJoinPanel");
+const privateCodeInput = document.getElementById("privateCodeInput");
+const joinPrivateBattleButton = document.getElementById("joinPrivateBattleButton");
+const privateBattleStatus = document.getElementById("privateBattleStatus");
 
-function getRandomBattleText() { return BATTLE_TEXTS[Math.floor(Math.random() * BATTLE_TEXTS.length)]; }
+// CONNECT — sets up every socket event listener once; re-calling is a no-op while connected.
+// Render's free tier spins the server down after inactivity, so a cold start can take 30-60s+
+// to wake up. We send a plain HTTP "wake-up" request first (which also wakes the instance),
+// then open the Socket.IO connection with a generous timeout + retry policy so the client
+// doesn't give up before the server has actually finished waking.
+function connectToMultiplayerServer() {
+  if (multiplayerSocket) return;
+  console.log("[Multiplayer] Waking server...");
+  if (findOpponentButton) {
+    findOpponentButton.disabled = true;
+    findOpponentButton.textContent = "Waking server...";
+  }
 
-/* HTTP */
-app.get("/", (req, res) => { res.send("Multiplayer server is running!"); });
+  fetch(MULTIPLAYER_SERVER_URL)
+    .then(() => console.log("[Multiplayer] Wake-up ping succeeded."))
+    .catch((err) => console.warn("[Multiplayer] Wake-up ping failed (continuing anyway):", err.message))
+    .finally(() => {
+      console.log("[Multiplayer] Connecting...");
+      multiplayerSocket = io(MULTIPLAYER_SERVER_URL, {
+        reconnectionAttempts: 10,
+        reconnectionDelay: 2000,
+        reconnectionDelayMax: 5000,
+        timeout: 60000, // give Render free tier up to 60s to wake from a cold start
+      });
 
-/* SOCKET */
-io.on("connection", socket => {
-  console.log("[SERVER] User connected:", socket.id);
+      /* CONNECTED */
+      multiplayerSocket.on("connect", () => {
+        console.log("[Multiplayer] Connected:", multiplayerSocket.id);
+        if (findOpponentButton && !multiplayerSearching && !multiplayerMode) {
+          findOpponentButton.disabled = false;
+          findOpponentButton.textContent = "◉ Find Opponent";
+        }
+        // A join started by an invite link (?private=CODE) can only run once we're connected.
+        if (multiplayerAutoJoinCode) autoJoinPrivateBattle(multiplayerAutoJoinCode);
+      });
 
-  /* FIND OPPONENT — pair with a waiting player or enqueue this one. */
-  socket.on("findOpponent", playerData => {
-    removeFromQueue(socket.id);
-    removeHostingPrivate(socket.id); // starting quick match discards any pending private room
-    const player = { id: socket.id, name: sanitizeName(playerData?.name), avatarUrl: sanitizeAvatar(playerData?.avatarUrl), socket };
-    console.log("[MATCHMAKING]", player.name, "is searching");
+      /* CONNECT ERROR — fires on CORS rejection, server down, DNS failure, timeout, etc.
+         Without this listener, a failed handshake fails completely silently. */
+      multiplayerSocket.on("connect_error", (err) => {
+        console.error("[Multiplayer] Connect error:", err.message);
+        console.error(err);
+        if (findOpponentButton) {
+          findOpponentButton.textContent = "Server unreachable, retrying...";
+        }
+      });
 
-    // Match an existing waiting player → create the room and the battle state for both.
-    if (matchmakingQueue.length > 0) {
-      const opponent = matchmakingQueue.shift();
-      const roomId = createRoomId();
-      socket.join(roomId);
-      opponent.socket.join(roomId);
-      const battle = {
-        roomId,
-        text: null,
-        startAt: null,
-        started: false,
-        finished: false,
-        players: { [opponent.id]: createPlayerState(opponent), [socket.id]: createPlayerState(player) }
-      };
-      battles.set(roomId, battle);
-      console.log("[MATCHMAKING] MATCH FOUND");
-      console.log("[MATCHMAKING] Room:", roomId);
-      // Tell each player who their opponent is.
-      opponent.socket.emit("matchFound", { roomId, opponent: { id: player.id, name: player.name, avatarUrl: player.avatarUrl } });
-      socket.emit("matchFound", { roomId, opponent: { id: opponent.id, name: opponent.name, avatarUrl: opponent.avatarUrl } });
+      /* RECONNECT ATTEMPTS — useful while Render's free tier is waking up from a cold start. */
+      multiplayerSocket.io.on("reconnect_attempt", (attempt) => {
+        console.log(`[Multiplayer] Reconnect attempt ${attempt}...`);
+      });
+
+      multiplayerSocket.io.on("reconnect_failed", () => {
+        console.error("[Multiplayer] Reconnect failed — giving up.");
+        if (findOpponentButton) {
+          findOpponentButton.disabled = false;
+          findOpponentButton.textContent = "Server unavailable — try again";
+        }
+      });
+
+      /* DISCONNECTED */
+      multiplayerSocket.on("disconnect", (reason) => {
+        console.log("[Multiplayer] Disconnected:", reason);
+        multiplayerSearching = false;
+        multiplayerBattleStarted = false;
+        clearMultiplayerTimers();
+        // If we never managed a private join, surface the failure to the user.
+        if (multiplayerAutoJoinCode) {
+          setPrivateStatus("Could not join the private battle — server not connected.");
+          multiplayerAutoJoinCode = null;
+        }
+        // If we intentionally left, don't do anything else.
+        if (multiplayerLeavingBattle) {
+          multiplayerLeavingBattle = false;
+          return;
+        }
+        // If the connection disappeared while in a multiplayer battle, clean up local state.
+        if (multiplayerMode && multiplayerRoomId) {
+          multiplayerMode = false;
+          multiplayerBattleStarted = false;
+          multiplayerBattleFinished = false;
+        }
+      });
+
+      /* SEARCHING — flips the Find button into its red cancel-search state. */
+      multiplayerSocket.on("searching", () => {
+        multiplayerSearching = true;
+        if (findOpponentButton) {
+          findOpponentButton.classList.add("cancel-search");
+          findOpponentButton.textContent = "Cancel Search";
+          findOpponentButton.disabled = false;
+        }
+        console.log("[Multiplayer] Searching...");
+      });
+
+      /* MATCH FOUND — is called once a room is created on the server. */
+      multiplayerSocket.on("matchFound", (data) => {
+        multiplayerSearching = false;
+        multiplayerMode = true;
+        multiplayerBattleFinished = false;
+        multiplayerRoomId = data.roomId;
+        multiplayerOpponent = data.opponent;
+        multiplayerLeavingBattle = false;
+        hidePrivateWaiting(); // a private joiner/host becomes a normal battle here
+        setPrivateStatus("");
+        console.log("[Multiplayer] MATCH FOUND!");
+        console.log("[Multiplayer] Room:", multiplayerRoomId);
+        console.log("[Multiplayer] Opponent:", multiplayerOpponent);
+        // Setup both player cards.
+        setupOwnUserUI();
+        setupOpponentUI();
+        if (findOpponentButton) {
+          findOpponentButton.classList.remove("cancel-search");
+          findOpponentButton.textContent = "Match Found!";
+          findOpponentButton.disabled = true;
+        }
+        // Tell the server this player is ready.
+        multiplayerSocket.emit("playerReady", { roomId: multiplayerRoomId });
+      });
+
+      /* BATTLE STARTING — server pushes the shared text + sync timestamp. */
+      multiplayerSocket.on("battleStarting", (data) => {
+        if (mpRematchButton) {
+          mpRematchButton.disabled = true;
+          mpRematchButton.textContent = "Starting...";
+        }
+        multiplayerTargetText = data.text;
+        multiplayerStartAt = data.startAt;
+        console.log("[Multiplayer] Battle starting at:", new Date(multiplayerStartAt));
+        prepareMultiplayerBattle();
+        startSynchronizedCountdown();
+      });
+
+      /* SERVER STATS — authoritative updates for player's own stats. */
+      multiplayerSocket.on("serverStats", (stats) => {
+        if (!multiplayerMode) return;
+        updateOwnStats(stats);
+      });
+
+      /* OPPONENT PROGRESS — the other racer's live progress from the server. */
+      multiplayerSocket.on("opponentProgress", (data) => {
+        if (!multiplayerMode) return;
+        updateOpponentProgress(data);
+      });
+
+      /* RESULT */
+      multiplayerSocket.on("battleResult", (data) => {
+        console.log("[Multiplayer] SERVER RESULT:", data);
+        showMultiplayerResult(data);
+      });
+
+      /* OPPONENT REMATCH READY */
+      multiplayerSocket.on("opponentRematchReady", () => {
+        console.log("[Multiplayer] Opponent wants a rematch");
+        if (mpRematchButton) {
+          mpRematchButton.disabled = false;
+          mpRematchButton.textContent = "Rematch Ready";
+        }
+      });
+
+      /* OPPONENT DISCONNECTED / LEFT — stops the battle locally and shows a non-blocking overlay
+         (NOT alert(), NO immediate redirect — the app stays visible with the card up). */
+      multiplayerSocket.on("opponentDisconnected", (data) => {
+        console.log("[Multiplayer] Opponent disconnected:", data);
+        clearMultiplayerTimers();
+        multiplayerSearching = false;
+        multiplayerBattleStarted = false;
+        multiplayerBattleFinished = true;
+        const message = data?.reason === "left"
+          ? "Your opponent left the battle."
+          : "Your opponent disconnected.";
+        showOpponentLeftNotification(message);
+      });
+
+      /* PRIVATE BATTLE CREATED — the server issued a fresh 6-digit code; show the waiting panel. */
+      multiplayerSocket.on("privateBattleCreated", (data) => {
+        multiplayerWaitingPrivate = true;
+        multiplayerPrivateCode = data.code;
+        showPrivateWaiting(data.code);
+      });
+
+      /* PRIVATE BATTLE ERROR — the code was invalid/expired or the server refused the join. */
+      multiplayerSocket.on("privateBattleError", (data) => {
+        multiplayerWaitingPrivate = false;
+        if (joinPrivateBattleButton) joinPrivateBattleButton.disabled = false;
+        setPrivateStatus(data?.message || "Could not join the private battle.");
+      });
+    });
+}
+
+// OPPONENT LEFT / DISCONNECTED NOTIFICATION — builds a fixed overlay + injected scoped styles, then
+// the Back button removes it, resets all multiplayer state, and returns to battle.html.
+function showOpponentLeftNotification(message) {
+  // Remove an existing notification if one somehow already exists.
+  const existingOverlay = document.getElementById("opponentDisconnectedOverlay");
+  if (existingOverlay) existingOverlay.remove();
+
+  // Assemble overlay > card > icon / heading / message / back button.
+  const overlay = document.createElement("div");
+  overlay.id = "opponentDisconnectedOverlay";
+  const card = document.createElement("div");
+  card.className = "opponent-disconnected-card";
+  const icon = document.createElement("div");
+  icon.className = "opponent-disconnected-icon";
+  icon.textContent = "!";
+  const title = document.createElement("h2");
+  title.textContent = "Battle Ended";
+  const text = document.createElement("p");
+  text.textContent = message;
+  const backButton = document.createElement("button");
+  backButton.type = "button";
+  backButton.id = "opponentDisconnectedBack";
+  backButton.textContent = "Back to Battle";
+  card.appendChild(icon);
+  card.appendChild(title);
+  card.appendChild(text);
+  card.appendChild(backButton);
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+
+  // Inject frontend-only styles, scoped to this notification (only created once).
+  let style = document.getElementById("opponentDisconnectedStyles");
+  if (!style) {
+    style = document.createElement("style");
+    style.id = "opponentDisconnectedStyles";
+    style.textContent = `
+      #opponentDisconnectedOverlay { position: fixed; inset: 0; z-index: 999999; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(0, 0, 0, 0.65); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+      .opponent-disconnected-card { width: min(420px, 100%); box-sizing: border-box; padding: 32px 28px; border-radius: 20px; text-align: center; background: var(--card-bg, #181818); color: var(--text-primary, #ffffff); border: 1px solid rgba(255, 255, 255, 0.1); box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45); animation: opponentDisconnectedAppear 0.2s ease-out; }
+      .opponent-disconnected-icon { width: 64px; height: 64px; margin: 0 auto 18px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: rgba(255, 255, 255, 0.08); font-size: 28px; }
+      .opponent-disconnected-card h2 { margin: 0 0 10px; font-size: 24px; font-weight: 700; }
+      .opponent-disconnected-card p { margin: 0 0 24px; opacity: 0.75; font-size: 15px; line-height: 1.5; }
+      #opponentDisconnectedBack { width: 100%; padding: 13px 20px; border: 0; border-radius: 10px; cursor: pointer; font: inherit; font-weight: 600; background: var(--accent, #ffffff); color: var(--accent-text, #000000); transition: opacity 0.15s ease, transform 0.15s ease; }
+      #opponentDisconnectedBack:hover { opacity: 0.9; transform: translateY(-1px); }
+      #opponentDisconnectedBack:active { transform: translateY(0); }
+      @keyframes opponentDisconnectedAppear { from { opacity: 0; transform: scale(0.96) translateY(8px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+    `;
+    document.head.appendChild(style);
+  }
+
+  // Back button: remove overlay, clean multiplayer state, return to battle page.
+  backButton.addEventListener("click", () => {
+    const currentOverlay = document.getElementById("opponentDisconnectedOverlay");
+    if (currentOverlay) currentOverlay.remove();
+    multiplayerMode = false;
+    multiplayerSearching = false;
+    multiplayerBattleStarted = false;
+    multiplayerBattleFinished = false;
+    multiplayerRoomId = null;
+    multiplayerOpponent = null;
+    multiplayerTargetText = "";
+    multiplayerTypedCharacters = [];
+    window.location.href = "battle.html";
+  });
+}
+
+// FIND OPPONENT — toggles matchmaking on/off; guard against double-clicks and mid-battle searches.
+if (findOpponentButton) {
+  findOpponentButton.addEventListener("click", () => {
+    // If already searching, cancel the search.
+    if (multiplayerSearching) {
+      cancelMultiplayerMatchmaking();
       return;
     }
-
-    // No opponent waiting — go into the queue and spin until someone matches.
-    matchmakingQueue.push(player);
-    socket.emit("searching");
-    console.log("[MATCHMAKING] Added to queue:", player.name);
-  });
-
-  /* CANCEL SEARCH — drop this player from the waiting queue. */
-  socket.on("cancelMatchmaking", () => {
-    removeFromQueue(socket.id);
-    console.log("[MATCHMAKING] Search cancelled:", socket.id);
-  });
-
-  /* CREATE PRIVATE BATTLE — host requests a fresh 6-digit code; a pending room is stored so a joiner can pair up. */
-  socket.on("createPrivateBattle", playerData => {
-    removeFromQueue(socket.id);
-    removeHostingPrivate(socket.id); // a player can only host one pending private room
-    const player = { id: socket.id, name: sanitizeName(playerData?.name), avatarUrl: sanitizeAvatar(playerData?.avatarUrl), socket };
-    const code = generatePrivateCode();
-    privateBattles.set(code, { code, hostPlayer: player });
-    console.log("[PRIVATE] Created:", code, player.name);
-    socket.emit("privateBattleCreated", { code });
-  });
-
-  /* CANCEL PRIVATE BATTLE — host aborts; the code stops working. */
-  socket.on("cancelPrivateBattle", () => {
-    removeHostingPrivate(socket.id);
-    console.log("[PRIVATE] Cancelled:", socket.id);
-  });
-
-  /* JOIN PRIVATE BATTLE — pair the joiner with the host by code, then launch the normal battle (matchFound to both). */
-  socket.on("joinPrivateBattle", (data, callback) => {
-    const pending = privateBattles.get(typeof data?.code === "string" ? data.code.trim() : "");
-    if (!pending) { socket.emit("privateBattleError", { message: "Invalid or expired private battle code." }); return; }
-    removeFromQueue(socket.id);
-    removeFromQueue(pending.hostPlayer.id);
-    removeHostingPrivate(socket.id);
-    privateBattles.delete(pending.code);
-    const joiner = { id: socket.id, name: sanitizeName(data?.name), avatarUrl: sanitizeAvatar(data?.avatarUrl), socket };
-    const host = pending.hostPlayer;
-    const roomId = createRoomId();
-    socket.join(roomId);
-    host.socket.join(roomId);
-    const battle = { roomId, text: null, startAt: null, started: false, finished: false, players: { [host.id]: createPlayerState(host), [joiner.id]: createPlayerState(joiner) } };
-    battles.set(roomId, battle);
-    console.log("[PRIVATE] Joined:", pending.code, joiner.name, "→", roomId);
-    host.socket.emit("matchFound", { roomId, opponent: { id: joiner.id, name: joiner.name, avatarUrl: joiner.avatarUrl } });
-    socket.emit("matchFound", { roomId, opponent: { id: host.id, name: host.name, avatarUrl: host.avatarUrl } });
-    if (typeof callback === "function") callback({ ok: true });
-  });
-
-  /* PLAYER READY — the SERVER picks the passage (the client can never submit it); when both
-     players are ready, announce the shared text + an exact synchronized start time (now + 4s). */
-  socket.on("playerReady", ({ roomId }) => {
-    const battle = battles.get(roomId);
-    if (!battle || battle.finished) return;
-    const player = battle.players[socket.id];
-    if (!player) return;
-    if (!battle.text) battle.text = getRandomBattleText();
-    player.ready = true;
-    console.log("[BATTLE] Player ready:", socket.id, roomId);
-    const players = Object.values(battle.players);
-    const everyoneReady = players.length === 2 && players.every(p => p.ready);
-    if (!everyoneReady) return;
-    battle.startAt = Date.now() + 4000;
-    battle.started = false;
-    io.to(roomId).emit("battleStarting", { roomId, text: battle.text, startAt: battle.startAt });
-    console.log("[BATTLE] Server-selected text:", battle.text);
-    console.log("[BATTLE] Starting:", roomId);
-  });
-
-  /* KEY PRESS — server-authoritative: ignore before GO, past the end, or non-character keys;
-     store the key and send stats back to the player + progress to the opponent. */
-  socket.on("keyPress", ({ roomId, key }) => {
-    const battle = battles.get(roomId);
-    if (!battle || battle.finished || !battle.text || !battle.startAt) return;
-    // Do not allow typing before GO.
-    if (Date.now() < battle.startAt) return;
-    if (!battle.started) battle.started = true;
-    const player = battle.players[socket.id];
-    if (!player) return;
-    // Only real single-character keys are accepted.
-    if (typeof key !== "string" || key.length !== 1) return;
-    // Do not allow typing past the end of the text.
-    if (player.typed.length >= battle.text.length) return;
-    const index = player.typed.length;
-    const isCorrect = key === battle.text[index];
-    player.typed += key;
-    if (isCorrect) player.correct++; else player.incorrect++;
-    const stats = calculateStats(player, battle.startAt);
-    // Authoritative stats to the typist, authoritative progress to the opponent.
-    socket.emit("serverStats", stats);
-    socket.to(roomId).emit("opponentProgress", { playerId: socket.id, typed: player.typed.length, correct: player.correct, incorrect: player.incorrect, wpm: stats.wpm, accuracy: stats.accuracy });
-    // Finished → end the race.
-    if (player.typed.length >= battle.text.length) finishBattle(battle, socket.id);
-  });
-
-  /* BACKSPACE — remove the last character, recompute correct/incorrect from the remaining
-     sequence (never trust the client counts), and sync stats/progress again. */
-  socket.on("backspace", ({ roomId }) => {
-    const battle = battles.get(roomId);
-    if (!battle || battle.finished || !battle.started) return;
-    const player = battle.players[socket.id];
-    if (!player || player.typed.length === 0) return;
-    player.typed = player.typed.slice(0, -1);
-    recalculateCharacterCounts(player, battle.text);
-    const stats = calculateStats(player, battle.startAt);
-    socket.emit("serverStats", stats);
-    socket.to(roomId).emit("opponentProgress", { playerId: socket.id, typed: player.typed.length, correct: player.correct, incorrect: player.incorrect, wpm: stats.wpm, accuracy: stats.accuracy });
-  });
-
-  /* REMATCH — only after the previous battle finished; when both players are ready, reset the
-     battle state and relaunch with a freshly chosen text and a new synchronized start time. */
-  socket.on("requestRematch", ({ roomId }) => {
-    const battle = battles.get(roomId);
-    if (!battle) return;
-    const player = battle.players[socket.id];
-    // Rematch is only available after the previous battle has finished.
-    if (!player || !battle.finished) return;
-    player.rematchReady = true;
-    console.log("[REMATCH] Player ready:", socket.id, roomId);
-    socket.to(roomId).emit("opponentRematchReady");
-    const players = Object.values(battle.players);
-    const everyoneReady = players.length === 2 && players.every(p => p.rematchReady);
-    if (!everyoneReady) return;
-    // RESET BATTLE.
-    battle.text = getRandomBattleText();
-    battle.startAt = Date.now() + 4000;
-    battle.started = false;
-    battle.finished = false;
-    players.forEach(p => { p.ready = false; p.rematchReady = false; p.typed = ""; p.correct = 0; p.incorrect = 0; });
-    io.to(roomId).emit("battleStarting", { roomId, text: battle.text, startAt: battle.startAt });
-    console.log("[REMATCH] Starting:", roomId);
-    console.log("[REMATCH] New text:", battle.text);
-  });
-
-  /* LEAVE BATTLE — acknowledge to the leaver (callback) after the server processed the request. */
-  socket.on("leaveBattle", (data, callback) => {
-    const success = leaveBattle(socket, data.roomId);
-    if (typeof callback === "function") callback({ ok: success });
-  });
-
-  /* DISCONNECTING — fires BEFORE Socket.IO removes the socket from its rooms: drop from the
-     queue, and if mid-battle notify the opponent then delete the room (only when not finished). */
-  socket.on("disconnecting", reason => {
-    console.log("[SERVER] Player disconnecting:", socket.id, "Reason:", reason);
-    removeFromQueue(socket.id);
-    removeHostingPrivate(socket.id); // close any pending private room this host was waiting in
-    for (const [roomId, battle] of battles.entries()) {
-      if (!battle.players[socket.id]) continue; // this socket isn't part of this battle
-      console.log("[BATTLE] Disconnecting player found:", socket.id, "Room:", roomId);
-      if (!battle.finished) {
-        const opponentId = Object.keys(battle.players).find(id => id !== socket.id);
-        if (opponentId) {
-          console.log("[BATTLE] Notifying opponent about disconnect:", opponentId);
-          io.to(opponentId).emit("opponentDisconnected", { reason: "disconnect" });
-          console.log("[BATTLE] Disconnect notification sent.");
-        }
-        battles.delete(roomId);
-        console.log("[BATTLE] Room deleted:", roomId);
-      }
+    // Don't search while already inside a multiplayer battle.
+    if (multiplayerMode) {
+      console.log("[Multiplayer] Already in battle.");
+      return;
     }
+    // Make sure Socket.IO is connected.
+    if (!multiplayerSocket || !multiplayerSocket.connected) {
+      console.error("[Multiplayer] Server not connected.");
+      findOpponentButton.textContent = "Still connecting...";
+      return;
+    }
+    const user = typeof getBattleUser === "function"
+      ? getBattleUser()
+      : { name: "Player", avatarUrl: null };
+    // Prevent double-clicks.
+    findOpponentButton.disabled = true;
+    findOpponentButton.textContent = "Searching...";
+    multiplayerSocket.emit("findOpponent", { name: user.name, avatarUrl: user.avatarUrl });
   });
+}
 
-  socket.on("disconnect", reason => { console.log("[SERVER] User disconnected:", socket.id, "Reason:", reason); });
+// CANCEL SEARCH — returns the Find button to its idle state.
+function cancelMultiplayerMatchmaking() {
+  if (!multiplayerSocket) return;
+  multiplayerSocket.emit("cancelMatchmaking");
+  multiplayerSearching = false;
+  if (findOpponentButton) {
+    findOpponentButton.classList.remove("cancel-search");
+    findOpponentButton.textContent = "◉ Find Opponent";
+    findOpponentButton.disabled = false;
+  }
+  console.log("[Multiplayer] Search cancelled");
+}
+
+// PRIVATE BATTLE — create/join a 6-digit-code room against a real player; the match then rides the normal matchFound flow.
+
+// CREATE — ask the server for a code; the waiting panel appears with code + invite link.
+function createPrivateBattle() {
+  if (multiplayerMode) { setPrivateStatus("You are already in a battle."); return; }
+  if (multiplayerWaitingPrivate) return;
+  if (!multiplayerSocket || !multiplayerSocket.connected) { setPrivateStatus("Server not connected."); return; }
+  if (multiplayerSearching) cancelMultiplayerMatchmaking();
+  setPrivateStatus("Creating private battle...");
+  multiplayerSocket.emit("createPrivateBattle", battleUserPayload());
+}
+
+// JOIN — validate the 6-digit code and ask the server to pair us with the host.
+function joinPrivateBattle() {
+  const code = privateCodeInput ? privateCodeInput.value.trim() : "";
+  if (!/^\d{6}$/.test(code)) { setPrivateStatus("Enter the 6-digit code."); return; }
+  if (multiplayerMode) { setPrivateStatus("You are already in a battle."); return; }
+  if (!multiplayerSocket || !multiplayerSocket.connected) { setPrivateStatus("Server not connected."); return; }
+  if (multiplayerSearching) cancelMultiplayerMatchmaking();
+  if (multiplayerWaitingPrivate) hidePrivateWaiting();
+  if (joinPrivateBattleButton) joinPrivateBattleButton.disabled = true;
+  setPrivateStatus("Joining private battle...");
+  multiplayerSocket.emit("joinPrivateBattle", { code, ...battleUserPayload() }, () => {
+    if (joinPrivateBattleButton) joinPrivateBattleButton.disabled = false;
+  });
+}
+
+// AUTO-JOIN — used by the invite link (?private=CODE): fires once the socket connects.
+function autoJoinPrivateBattle(code) {
+  multiplayerAutoJoinCode = null;
+  if (joinPrivateBattleButton) joinPrivateBattleButton.disabled = true;
+  setPrivateStatus("Joining private battle...");
+  multiplayerSocket.emit("joinPrivateBattle", { code, ...battleUserPayload() }, () => {
+    if (joinPrivateBattleButton) joinPrivateBattleButton.disabled = false;
+  });
+}
+
+// WAITING — reveals the code + invite link and hides the create/join controls.
+function showPrivateWaiting(code) {
+  if (createPrivateBattleButton) createPrivateBattleButton.classList.add("hidden");
+  if (privateJoinPanel) privateJoinPanel.classList.add("hidden");
+  if (!privateWaitingPanel) return;
+  privateWaitingPanel.classList.remove("hidden");
+  if (privateCodeDisplay) privateCodeDisplay.textContent = code;
+  const url = buildPrivateInviteUrl(code);
+  if (privateInviteLink) { privateInviteLink.textContent = url; privateInviteLink.dataset.url = url; }
+  setPrivateStatus("Waiting for opponent to join with this code.");
+}
+
+// HIDE WAITING — clears private state and returns to the create/join controls.
+function hidePrivateWaiting() {
+  multiplayerWaitingPrivate = false;
+  multiplayerPrivateCode = null;
+  if (privateWaitingPanel) privateWaitingPanel.classList.add("hidden");
+  if (createPrivateBattleButton) createPrivateBattleButton.classList.remove("hidden");
+  if (privateJoinPanel) privateJoinPanel.classList.remove("hidden");
+}
+
+// INVITE URL — a link to battle.html?private=CODE so opening it auto-joins the room.
+function buildPrivateInviteUrl(code) {
+  const url = new URL("battle.html", window.location.href);
+  url.searchParams.set("private", code);
+  return url.href;
+}
+
+// STATUS — one-line helper message on the private panel (falls back to the console).
+function setPrivateStatus(message) {
+  if (privateBattleStatus) privateBattleStatus.textContent = message;
+  else console.log("[Private]", message);
+}
+
+// PAYLOAD — current user's name + avatar for private-battle events.
+function battleUserPayload() {
+  const user = typeof getBattleUser === "function" ? getBattleUser() : { name: "Player", avatarUrl: null };
+  return { name: user.name, avatarUrl: user.avatarUrl };
+}
+
+// CREATE BUTTON
+if (createPrivateBattleButton) createPrivateBattleButton.addEventListener("click", createPrivateBattle);
+
+// JOIN — click or Enter inside the code box.
+if (joinPrivateBattleButton) joinPrivateBattleButton.addEventListener("click", joinPrivateBattle);
+if (privateCodeInput) privateCodeInput.addEventListener("keydown", (event) => { if (event.key === "Enter") joinPrivateBattle(); });
+
+// CANCEL WAITING — tells the server the room is dead and returns to the controls.
+if (privateCancelButton) privateCancelButton.addEventListener("click", () => {
+  if (multiplayerSocket && multiplayerSocket.connected) multiplayerSocket.emit("cancelPrivateBattle");
+  hidePrivateWaiting();
+  setPrivateStatus("Private battle cancelled.");
 });
 
-/* CREATE PLAYER STATE — fresh per-battle record for one racer. */
-function createPlayerState(player) {
-  return { id: player.id, name: player.name, avatarUrl: player.avatarUrl, ready: false, rematchReady: false, typed: "", correct: 0, incorrect: 0 };
-}
-
-/* CALCULATE AUTHORITATIVE STATS — server time only; same Battle Score shape as the battle system
-   (net WPM = correct − incorrect, × accuracy², both clamped). */
-function calculateStats(player, startAt) {
-  const elapsed = Math.max(1, (Date.now() - startAt) / 1000);
-  const totalTyped = player.typed.length;
-  const accuracy = totalTyped > 0 ? (player.correct / totalTyped) * 100 : 100;
-  const netCharacters = player.correct - player.incorrect;
-  const rawNetWpm = (netCharacters / 5) / (elapsed / 60);
-  const netWpm = clamp(rawNetWpm, 0, 250);
-  const accuracyMultiplier = Math.pow(clamp(accuracy, 0, 100) / 100, 2);
-  const score = netWpm * accuracyMultiplier;
-  return { typed: totalTyped, correct: player.correct, incorrect: player.incorrect, wpm: round(netWpm), accuracy: round(accuracy), score: round(score), elapsed };
-}
-
-/* RECALCULATE COUNTS — recompute correct/incorrect from the remaining typed sequence. */
-function recalculateCharacterCounts(player, text) {
-  let correct = 0;
-  for (let i = 0; i < player.typed.length; i++) { if (player.typed[i] === text[i]) correct++; }
-  player.correct = correct;
-  player.incorrect = player.typed.length - correct;
-}
-
-/* FINISH BATTLE — winner = higher SERVER-calculated Battle Score (a genuine score tie goes to the
-   first finisher); emit the result, then schedule room cleanup in 60s (only if still the same
-   finished battle, so a rematch isn't torn down). */
-function finishBattle(battle, finisherId) {
-  if (battle.finished) return;
-  battle.finished = true;
-  const playerIds = Object.keys(battle.players);
-  const playerA = battle.players[playerIds[0]];
-  const playerB = battle.players[playerIds[1]];
-  const statsA = calculateStats(playerA, battle.startAt);
-  const statsB = calculateStats(playerB, battle.startAt);
-  let winnerId;
-  if (statsA.score > statsB.score) {
-    winnerId = playerA.id;
-  } else if (statsB.score > statsA.score) {
-    winnerId = playerB.id;
+// COPY INVITE LINK — clipboard when available, otherwise shows the URL as the status.
+if (copyInviteButton) copyInviteButton.addEventListener("click", () => {
+  const url = privateInviteLink?.dataset.url;
+  if (!url) return;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url)
+      .then(() => setPrivateStatus("Invite link copied!"))
+      .catch(() => setPrivateStatus("Could not copy the invite link."));
   } else {
-    winnerId = finisherId; // genuine score tie → whoever finished first wins
+    setPrivateStatus(url);
   }
-  io.to(battle.roomId).emit("battleResult", {
-    winnerId,
-    players: {
-      [playerA.id]: { id: playerA.id, name: playerA.name, avatarUrl: playerA.avatarUrl, ...statsA },
-      [playerB.id]: { id: playerB.id, name: playerB.name, avatarUrl: playerB.avatarUrl, ...statsB }
-    }
-  });
-  console.log("[BATTLE] Finished:", battle.roomId);
-  console.log("[BATTLE] Winner:", winnerId);
-  setTimeout(() => {
-    const currentBattle = battles.get(battle.roomId);
-    // Only delete if this is still the same finished battle (not a rematch that already started).
-    if (currentBattle === battle && battle.finished) battles.delete(battle.roomId);
-  }, 60000);
-}
-
-/* LEAVE BATTLE — notify the opponent (while still active), delete the room, leave it, ack. */
-function leaveBattle(socket, roomId) {
-  const battle = battles.get(roomId);
-  if (!battle) return false; // battle doesn't exist
-  console.log("[BATTLE] Player leaving:", socket.id, "Room:", roomId);
-  const opponentId = Object.keys(battle.players).find(id => id !== socket.id);
-  // Notify the opponent while the battle is still active.
-  if (!battle.finished && opponentId) {
-    console.log("[BATTLE] Notifying opponent about leave:", opponentId);
-    io.to(opponentId).emit("opponentDisconnected", { reason: "left" });
-    console.log("[BATTLE] Opponent notified.");
-  }
-  battles.delete(roomId);
-  console.log("[BATTLE] Room deleted:", roomId);
-  socket.leave(roomId);
-  return true;
-}
-
-/* QUEUE */
-function removeFromQueue(socketId) {
-  const index = matchmakingQueue.findIndex(player => player.id === socketId);
-  if (index !== -1) matchmakingQueue.splice(index, 1);
-}
-// Tear down any pending private room this socket is hosting.
-function removeHostingPrivate(socketId) {
-  for (const [code, pb] of privateBattles) { if (pb.hostPlayer.id === socketId) { privateBattles.delete(code); return; } }
-}
-// FRESH 6-DIGIT CODE — numeric and unique among pending private rooms.
-function generatePrivateCode() {
-  let code;
-  do { code = String(Math.floor(100000 + Math.random() * 900000)); } while (privateBattles.has(code));
-  return code;
-}
-
-/* HELPERS */
-function createRoomId() { return "battle_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8); }
-// Sanitize a display name (strip control chars, cap at 30 chars, default "Player").
-function sanitizeName(name) {
-  if (typeof name !== "string") return "Player";
-  return name.replace(/[\u0000-\u001F\u007F]/g, "").trim().slice(0, 30) || "Player";
-}
-// Only allow normal HTTP(S) profile-picture URLs, capped at 1000 chars.
-function sanitizeAvatar(url) {
-  if (typeof url !== "string" || !url) return null;
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
-    return parsed.href.slice(0, 1000);
-  } catch { return null; }
-}
-function clamp(value, min, max) { return Math.max(min, Math.min(max, value)); }
-function round(value) { return Math.round(value * 10) / 10; }
-
-/* START SERVER */
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`Multiplayer server running on port ${PORT}`);
 });
+
+// OWN USER UI — mirrors getBattleUser() into #battleUserName + .user-racer-avatar (initial fallback).
+function setupOwnUserUI() {
+  const user = typeof getBattleUser === "function"
+    ? getBattleUser()
+    : { name: "Player", avatarUrl: null };
+  const userName = document.getElementById("battleUserName");
+  const userAvatar = document.querySelector(".user-racer-avatar");
+  if (userName) userName.textContent = user.name || "Player";
+  if (!userAvatar) return;
+  userAvatar.innerHTML = "";
+  if (user.avatarUrl) {
+    const img = document.createElement("img");
+    img.src = user.avatarUrl;
+    img.alt = "Your profile picture";
+    img.className = "racer-avatar-image";
+    img.onerror = () => { userAvatar.innerHTML = ""; userAvatar.textContent = getInitial(user.name); };
+    userAvatar.appendChild(img);
+  } else {
+    userAvatar.textContent = getInitial(user.name);
+  }
+}
+
+// OPPONENT UI — shows the matched player in the bot card slot and relabels "Bot" → "Opponent".
+function setupOpponentUI() {
+  const opponentName = document.getElementById("botName");
+  const opponentAvatar = document.querySelector(".bot-racer-avatar");
+  if (opponentName) opponentName.textContent = multiplayerOpponent?.name || "Opponent";
+  // Change the "Bot" label under the opponent racer to "Opponent".
+  const opponentCard = document.querySelector(".bot-racer-card");
+  if (opponentCard) {
+    const label = opponentCard.querySelector(".racer-info span");
+    if (label) label.textContent = "Opponent";
+  }
+  if (opponentAvatar) {
+    opponentAvatar.innerHTML = "";
+    if (multiplayerOpponent && multiplayerOpponent.avatarUrl) {
+      const img = document.createElement("img");
+      img.src = multiplayerOpponent.avatarUrl;
+      img.alt = "Opponent profile picture";
+      img.className = "racer-avatar-image";
+      img.onerror = () => { opponentAvatar.innerHTML = ""; opponentAvatar.textContent = getInitial(multiplayerOpponent.name); };
+      opponentAvatar.appendChild(img);
+    } else {
+      opponentAvatar.textContent = getInitial(multiplayerOpponent?.name);
+    }
+  }
+}
+
+// PREPARE BATTLE — resets the shared battle screens/state and shows the countdown screen using the server's text.
+function prepareMultiplayerBattle() {
+  clearMultiplayerTimers();
+  setupOwnUserUI();
+  setupOpponentUI();
+  multiplayerTypedCharacters = [];
+  multiplayerBattleStarted = false;
+  multiplayerBattleFinished = false;
+  multiplayerStartTime = null;
+  // Use the existing battle renderer (in battle.js).
+  targetCharacters = Array.from(multiplayerTargetText);
+  renderBattleText();
+  // User stats.
+  userProgress.style.width = "0%";
+  userProgressText.textContent = "0%";
+  userWpm.textContent = "0";
+  userAccuracy.textContent = "100%";
+  // Opponent stats.
+  botProgress.style.width = "0%";
+  botProgressText.textContent = "0%";
+  botWpm.textContent = "0";
+  botAccuracy.textContent = "100%";
+  battleTime.textContent = "00:00";
+  battleStatus.textContent = "Get ready...";
+  // Labels.
+  battleCategoryLabel.textContent = "Multiplayer";
+  battleDifficultyLabel.textContent = "Real User";
+  showScreen(battleCountdown);
+}
+
+// SYNCHRONIZED COUNTDOWN — counts down against the server-provided start time (not local), so both
+// players start at the exact same moment despite latency.
+function startSynchronizedCountdown() {
+  clearInterval(multiplayerCountdownTimer);
+  const update = () => {
+    const remaining = multiplayerStartAt - Date.now();
+    if (remaining <= 0) {
+      clearInterval(multiplayerCountdownTimer);
+      multiplayerCountdownTimer = null;
+      countdownNumber.textContent = "GO!";
+      setTimeout(() => { beginMultiplayerBattle(); }, 200);
+      return;
+    }
+    const seconds = Math.ceil(remaining / 1000);
+    countdownNumber.textContent = seconds;
+    countdownNumber.style.animation = "none";
+    void countdownNumber.offsetWidth;
+    countdownNumber.style.animation = "countdownPop 0.8s ease";
+  };
+  update();
+  multiplayerCountdownTimer = setInterval(update, 50);
+}
+
+// BEGIN BATTLE — shows the game screen, anchors the clock to the server timestamp, starts it.
+function beginMultiplayerBattle() {
+  if (multiplayerBattleFinished) return;
+  showScreen(battleGame);
+  multiplayerBattleStarted = true;
+  multiplayerStartTime = multiplayerStartAt;
+  battleStatus.textContent = "Start typing!";
+  focusBattleInput();
+  multiplayerTimer = setInterval(updateMultiplayerClock, 100);
+}
+
+// CLOCK — purely cosmetic race timer derived from the server start time.
+function updateMultiplayerClock() {
+  if (!multiplayerBattleStarted || multiplayerBattleFinished) return;
+  const elapsed = Math.max(0, (Date.now() - multiplayerStartTime) / 1000);
+  battleTime.textContent = formatTime(elapsed);
+}
+
+// KEYBOARD — individual keystrokes are forwarded to the server, which is authoritative.
+document.addEventListener("keydown", (event) => {
+  if (!multiplayerMode || !multiplayerBattleStarted || multiplayerBattleFinished) return;
+  if (event.ctrlKey || event.altKey || event.metaKey) return;
+  // Prevent key-repeat abuse.
+  if (event.repeat) { event.preventDefault(); return; }
+
+  /* BACKSPACE — trimmed locally then echoed to the server. */
+  if (event.key === "Backspace") {
+    event.preventDefault();
+    if (multiplayerTypedCharacters.length === 0) return;
+    multiplayerTypedCharacters.pop();
+    playBackspaceSound();
+    renderMultiplayerTyping();
+    multiplayerSocket.emit("backspace", { roomId: multiplayerRoomId });
+    return;
+  }
+
+  // Ignore special keys.
+  if (event.key.length !== 1) return;
+  event.preventDefault();
+  if (multiplayerTypedCharacters.length >= multiplayerTargetText.length) return;
+
+  const index = multiplayerTypedCharacters.length;
+  const correct = event.key === multiplayerTargetText[index];
+  multiplayerTypedCharacters.push(event.key);
+  if (correct) {
+    playTypeSound();
+  } else {
+    playErrorSound();
+    triggerBattleWrongCharacterFeedback();
+  }
+  renderMultiplayerTyping();
+  multiplayerSocket.emit("keyPress", { roomId: multiplayerRoomId, key: event.key });
+});
+
+// RENDER USER — same colored-character rendering as the race (correct/incorrect/current), with scroll-into-view.
+function renderMultiplayerTyping() {
+  const characters = battleTypingText.querySelectorAll(".battle-character");
+  characters.forEach((character, index) => {
+    character.classList.remove("correct", "incorrect", "current");
+    if (index < multiplayerTypedCharacters.length) {
+      character.classList.add(multiplayerTypedCharacters[index] === multiplayerTargetText[index] ? "correct" : "incorrect");
+      return;
+    }
+    if (index === multiplayerTypedCharacters.length) character.classList.add("current");
+  });
+  const current = battleTypingText.querySelector(".current");
+  if (current) current.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+// SERVER STATS — server remains authoritative: whenever its typed count differs, local state is reconciled.
+function updateOwnStats(stats) {
+  const percent = multiplayerTargetText.length > 0 ? (stats.typed / multiplayerTargetText.length) * 100 : 0;
+  userProgress.style.width = Math.min(100, percent) + "%";
+  userProgressText.textContent = Math.round(Math.min(100, percent)) + "%";
+  userWpm.textContent = Math.round(stats.wpm || 0);
+  userAccuracy.textContent = Math.round(stats.accuracy ?? 100) + "%";
+  if (stats.typed !== multiplayerTypedCharacters.length) {
+    multiplayerTypedCharacters = multiplayerTypedCharacters.slice(0, stats.typed);
+    renderMultiplayerTyping();
+  }
+}
+
+// OPPONENT PROGRESS — mirrors the server-tracked opponent into the bot card UI.
+function updateOpponentProgress(data) {
+  const percent = multiplayerTargetText.length > 0 ? (data.typed / multiplayerTargetText.length) * 100 : 0;
+  botProgress.style.width = Math.min(100, percent) + "%";
+  botProgressText.textContent = Math.round(Math.min(100, percent)) + "%";
+  botWpm.textContent = Math.round(data.wpm || 0);
+  botAccuracy.textContent = Math.round(data.accuracy ?? 100) + "%";
+}
+
+// RESULT — renders the server-calculated result, relabels Bot → Opponent, syncs to the leaderboard
+// through battle.js's syncBattleResultToServer (loaded before this file), and shows the result screen.
+function showMultiplayerResult(data) {
+  clearMultiplayerTimers();
+  multiplayerBattleFinished = true;
+  multiplayerBattleStarted = false;
+  // Enable rematch.
+  if (mpRematchButton) {
+    mpRematchButton.disabled = false;
+    mpRematchButton.textContent = "↻ Rematch";
+  }
+  const myId = multiplayerSocket.id;
+  const me = data.players[myId];
+  const opponentId = Object.keys(data.players).find((id) => id !== myId);
+  const opponent = opponentId ? data.players[opponentId] : null;
+  // Server-calculated values.
+  resultUserScore.textContent = me?.score ?? 0;
+  resultUserWpm.textContent = Math.round(me?.wpm ?? 0);
+  resultUserAccuracy.textContent = Math.round(me?.accuracy ?? 0) + "%";
+  resultBotScore.textContent = opponent?.score ?? 0;
+  resultBotWpm.textContent = Math.round(opponent?.wpm ?? 0);
+  resultBotAccuracy.textContent = Math.round(opponent?.accuracy ?? 0) + "%";
+  // Change Bot labels to Opponent.
+  const resultLabels = document.querySelectorAll(".battle-result-stat span");
+  resultLabels.forEach((label) => {
+    if (label.textContent.trim() === "Bot Score") label.textContent = "Opponent Score";
+    if (label.textContent.trim() === "Bot WPM") label.textContent = "Opponent WPM";
+    if (label.textContent.trim() === "Bot Accuracy") label.textContent = "Opponent Accuracy";
+  });
+  const didWin = data.winnerId === myId;
+  // Real sync to the backend so this real-opponent battle reflects on the leaderboard too.
+  if (typeof syncBattleResultToServer === "function") {
+    syncBattleResultToServer({
+      mode: "multiplayer",
+      category: "Battle",
+      opponentName: opponent?.name || "Opponent",
+      opponentType: "player",
+      result: !data.winnerId ? "draw" : (didWin ? "win" : "loss"),
+      userScore: me?.score ?? 0,
+      userWpm: me?.wpm ?? 0,
+      userAccuracy: me?.accuracy ?? 0,
+      opponentScore: opponent?.score ?? 0,
+      opponentWpm: opponent?.wpm ?? 0,
+      opponentAccuracy: opponent?.accuracy ?? 0,
+    });
+  }
+  resultBattleIcon.textContent = didWin ? "🏆" : "⚔️";
+  battleResultTitle.textContent = didWin ? "You Win!" : "You Lose";
+  battleResultSubtitle.textContent = didWin
+    ? "Higher Battle Score — well typed."
+    : "Your opponent had the higher Battle Score.";
+  showScreen(battleResult);
+}
+
+// REMATCH — capture phase (true) gives multiplayer priority over battle.js's bot-rematch handler.
+if (mpRematchButton) {
+  mpRematchButton.addEventListener("click", (event) => {
+    if (!multiplayerMode) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (!multiplayerSocket || !multiplayerSocket.connected) {
+      console.error("[Multiplayer] Server not connected.");
+      return;
+    }
+    if (!multiplayerRoomId) return;
+    if (!multiplayerBattleFinished) return;
+    mpRematchButton.disabled = true;
+    mpRematchButton.textContent = "Waiting for Opponent...";
+    multiplayerSocket.emit("requestRematch", { roomId: multiplayerRoomId });
+    console.log("[Multiplayer] Rematch requested");
+  }, true);
+}
+
+// RESULT BACK — the result screen's back button, multiplayer-aware: emits leaveBattle and waits for
+// the server ack before navigating (with a 500ms safety fallback to avoid duplicate redirects).
+if (mpResultBackButton) {
+  mpResultBackButton.addEventListener("click", (event) => {
+    // Only override this button for multiplayer battles.
+    if (!multiplayerMode) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    console.log("[Multiplayer] Leaving result:", multiplayerRoomId);
+    multiplayerLeavingBattle = true;
+    const roomId = multiplayerRoomId; // save before clearing state
+    clearMultiplayerTimers();
+    let navigated = false; // prevent multiple redirects
+    const returnToBattle = () => {
+      if (navigated) return;
+      navigated = true;
+      window.location.href = "battle.html";
+    };
+    if (multiplayerSocket && multiplayerSocket.connected && roomId) {
+      multiplayerSocket.emit("leaveBattle", { roomId }, () => {
+        console.log("[Multiplayer] Result leave acknowledged.");
+        returnToBattle();
+      });
+      setTimeout(returnToBattle, 500); // safety fallback
+    } else {
+      returnToBattle();
+    }
+    // Clear local multiplayer state.
+    multiplayerMode = false;
+    multiplayerSearching = false;
+    multiplayerBattleStarted = false;
+    multiplayerBattleFinished = false;
+    multiplayerRoomId = null;
+    multiplayerOpponent = null;
+    multiplayerTargetText = "";
+    multiplayerTypedCharacters = [];
+  }, true);
+}
+
+// QUIT BATTLE — same server-graceful leave flow as the result back button.
+if (mpQuitBattleButton) {
+  mpQuitBattleButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    // If there isn't an active multiplayer battle, just go back.
+    if (!multiplayerMode || !multiplayerRoomId) {
+      window.location.href = "battle.html";
+      return;
+    }
+    console.log("[Multiplayer] Leaving battle:", multiplayerRoomId);
+    multiplayerLeavingBattle = true; // mark as intentional leave
+    const roomId = multiplayerRoomId; // save before clearing state
+    clearMultiplayerTimers();
+    let navigated = false; // prevent multiple redirects
+    const returnToBattle = () => {
+      if (navigated) return;
+      navigated = true;
+      window.location.href = "battle.html";
+    };
+    if (multiplayerSocket && multiplayerSocket.connected) {
+      // Wait for the server acknowledgement before navigating away.
+      multiplayerSocket.emit("leaveBattle", { roomId }, () => {
+        console.log("[Multiplayer] Leave acknowledged by server.");
+        returnToBattle();
+      });
+      setTimeout(returnToBattle, 500); // safety fallback
+    } else {
+      returnToBattle();
+    }
+    // Clear local multiplayer state.
+    multiplayerMode = false;
+    multiplayerSearching = false;
+    multiplayerBattleStarted = false;
+    multiplayerBattleFinished = false;
+    multiplayerRoomId = null;
+    multiplayerOpponent = null;
+    multiplayerTargetText = "";
+    multiplayerTypedCharacters = [];
+  });
+}
+
+// TIMER CLEANUP — stops both in-flight intervals (clock + synchronized countdown).
+function clearMultiplayerTimers() {
+  if (multiplayerTimer) { clearInterval(multiplayerTimer); multiplayerTimer = null; }
+  if (multiplayerCountdownTimer) { clearInterval(multiplayerCountdownTimer); multiplayerCountdownTimer = null; }
+}
+
+// HELPERS
+function getInitial(name) { return String(name || "P").charAt(0).toUpperCase(); }
+
+// INVITE-LINK ENTRY — a battle.html?private=CODE link auto-joins once the socket connects.
+const privateParam = new URLSearchParams(window.location.search).get("private");
+if (privateParam && /^\d{6}$/.test(privateParam)) {
+  multiplayerAutoJoinCode = privateParam;
+  setPrivateStatus("Opening private battle invite...");
+}
+
+// START
+connectToMultiplayerServer();
