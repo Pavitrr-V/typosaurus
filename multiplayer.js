@@ -49,32 +49,47 @@ const privateBattleStatus = document.getElementById("privateBattleStatus");
 function connectToMultiplayerServer() {
   if (multiplayerSocket) return;
   console.log("[Multiplayer] Connecting...");
-  multiplayerSocket = io(MULTIPLAYER_SERVER_URL);
+  multiplayerSocket = io(MULTIPLAYER_SERVER_URL, {
+    reconnectionAttempts: 5,
+    timeout: 10000,
+  });
 
   /* CONNECTED */
   multiplayerSocket.on("connect", () => {
     console.log("[Multiplayer] Connected:", multiplayerSocket.id);
-    // A join started by an invite link (?private=CODE) can only run once we're connected.
     if (multiplayerAutoJoinCode) autoJoinPrivateBattle(multiplayerAutoJoinCode);
   });
 
+  /* CONNECT ERROR — fires on CORS rejection, server down, DNS failure, timeout, etc.
+     Without this listener, a failed handshake fails completely silently. */
+  multiplayerSocket.on("connect_error", (err) => {
+    console.error("[Multiplayer] Connect error:", err.message);
+    console.error(err);
+  });
+
+  /* RECONNECT ATTEMPTS — useful while Render's free tier is waking up from a cold start. */
+  multiplayerSocket.io.on("reconnect_attempt", (attempt) => {
+    console.log(`[Multiplayer] Reconnect attempt ${attempt}...`);
+  });
+
+  multiplayerSocket.io.on("reconnect_failed", () => {
+    console.error("[Multiplayer] Reconnect failed — giving up.");
+  });
+
   /* DISCONNECTED */
-  multiplayerSocket.on("disconnect", () => {
-    console.log("[Multiplayer] Disconnected");
+  multiplayerSocket.on("disconnect", (reason) => {
+    console.log("[Multiplayer] Disconnected:", reason);
     multiplayerSearching = false;
     multiplayerBattleStarted = false;
     clearMultiplayerTimers();
-    // If we never managed a private join, surface the failure to the user.
     if (multiplayerAutoJoinCode) {
       setPrivateStatus("Could not join the private battle — server not connected.");
       multiplayerAutoJoinCode = null;
     }
-    // If we intentionally left, don't do anything else.
     if (multiplayerLeavingBattle) {
       multiplayerLeavingBattle = false;
       return;
     }
-    // If the connection disappeared while in a multiplayer battle, clean up local state.
     if (multiplayerMode && multiplayerRoomId) {
       multiplayerMode = false;
       multiplayerBattleStarted = false;
